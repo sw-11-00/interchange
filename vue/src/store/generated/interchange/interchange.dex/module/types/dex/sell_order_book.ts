@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { OrderBook } from "../dex/order";
 import { Writer, Reader } from "protobufjs/minimal";
 
 export const protobufPackage = "interchange.dex";
@@ -7,6 +8,7 @@ export interface SellOrderBook {
   index: string;
   amountDenom: string;
   priceDenom: string;
+  book: OrderBook | undefined;
 }
 
 const baseSellOrderBook: object = {
@@ -26,6 +28,9 @@ export const SellOrderBook = {
     if (message.priceDenom !== "") {
       writer.uint32(26).string(message.priceDenom);
     }
+    if (message.book !== undefined) {
+      OrderBook.encode(message.book, writer.uint32(34).fork()).ldelim();
+    }
     return writer;
   },
 
@@ -44,6 +49,9 @@ export const SellOrderBook = {
           break;
         case 3:
           message.priceDenom = reader.string();
+          break;
+        case 4:
+          message.book = OrderBook.decode(reader, reader.uint32());
           break;
         default:
           reader.skipType(tag & 7);
@@ -70,6 +78,11 @@ export const SellOrderBook = {
     } else {
       message.priceDenom = "";
     }
+    if (object.book !== undefined && object.book !== null) {
+      message.book = OrderBook.fromJSON(object.book);
+    } else {
+      message.book = undefined;
+    }
     return message;
   },
 
@@ -79,6 +92,8 @@ export const SellOrderBook = {
     message.amountDenom !== undefined &&
       (obj.amountDenom = message.amountDenom);
     message.priceDenom !== undefined && (obj.priceDenom = message.priceDenom);
+    message.book !== undefined &&
+      (obj.book = message.book ? OrderBook.toJSON(message.book) : undefined);
     return obj;
   },
 
@@ -98,6 +113,11 @@ export const SellOrderBook = {
       message.priceDenom = object.priceDenom;
     } else {
       message.priceDenom = "";
+    }
+    if (object.book !== undefined && object.book !== null) {
+      message.book = OrderBook.fromPartial(object.book);
+    } else {
+      message.book = undefined;
     }
     return message;
   },
