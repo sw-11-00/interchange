@@ -74,7 +74,38 @@ func (k Keeper) OnRecvSellOrderPacket(ctx sdk.Context, packet channeltypes.Packe
 	}
 
 	// TODO: packet reception logic
+	pairIndex := types.OrderBookIndex(packet.SourcePort, packet.SourceChannel, data.AmountDenom, data.PriceDenom)
+	book, found := k.GetBuyOrderBook(ctx, pairIndex)
+	if !found {
+		return packetAck, errors.New("the pair doesn't exist")
+	}
 
+	remaining, liquidated, gain, _ := book.FillSellOrder(types.Order{
+		Amount: data.Amount,
+		Price:  data.Price,
+	})
+
+	packetAck.RemainingAmount = remaining.Amount
+	packetAck.Gain = gain
+
+	finalAmountDenom, saved := k.OriginDenom(ctx, packet.DestinationPort, packet.DestinationChannel, data.AmountDenom)
+	if !saved {
+		finalAmountDenom = VoucherDenom(packet.SourcePort, packet.SourceChannel, data.AmountDenom)
+	}
+
+	for _, liquidation := range liquidated {
+		liquidation := liquidation
+		addr, err := sdk.AccAddressFromBech32(liquidation.Creator)
+		if err != nil {
+			return packetAck, err
+		}
+
+		if err := k.SafeMint(ctx, packet.DestinationPort, packet.DestinationChannel, addr, finalAmountDenom, liquidation.Amount); err != nil {
+			return packetAck, err
+		}
+	}
+
+	k.SetBuyOrderBook(ctx, book)
 	return packetAck, nil
 }
 
@@ -84,9 +115,14 @@ func (k Keeper) OnAcknowledgementSellOrderPacket(ctx sdk.Context, packet channel
 	switch dispatchedAck := ack.Response.(type) {
 	case *channeltypes.Acknowledgement_Error:
 
-		// TODO: failed acknowledgement logic
-		_ = dispatchedAck.Error
+		receiver, err := sdk.AccAddressFromBech32(data.Seller)
+		if err != nil {
+			return err
+		}
 
+		if err := k.SafeMint(ctx, packet.SourcePort, packet.SourceChannel, receiver, data.AmountDenom, data.Amount); err != nil {
+			return err
+		}
 		return nil
 	case *channeltypes.Acknowledgement_Result:
 		// Decode the packet acknowledgment
@@ -97,8 +133,36 @@ func (k Keeper) OnAcknowledgementSellOrderPacket(ctx sdk.Context, packet channel
 			return errors.New("cannot unmarshal acknowledgment")
 		}
 
-		// TODO: successful acknowledgement logic
+		pairIndex := types.OrderBookIndex(packet.SourcePort, packet.SourceChannel, data.AmountDenom, data.PriceDenom)
+		book, found := k.GetSellOrderBook(ctx, pairIndex)
+		if !found {
+			panic("sell order book must exist")
+		}
+		if packetAck.RemainingAmount > 0 {
+			_, err := book.AppendOrder(data.Seller, packetAck.RemainingAmount, data.Price)
+			if err != nil {
+				return err
+			}
 
+			// Save the new order book
+			k.SetSellOrderBook(ctx, book)
+		}
+		if packetAck.Gain > 0 {
+			receiver, err := sdk.AccAddressFromBech32(data.Seller)
+			if err != nil {
+				return err
+			}
+
+			finalPriceDenom, saved := k.OriginDenom(ctx, packet.SourcePort, packet.SourceChannel, data.PriceDenom)
+			if !saved {
+				// If it was not from this chain we use voucher as denom
+				finalPriceDenom = VoucherDenom(packet.DestinationPort, packet.DestinationChannel, data.PriceDenom)
+			}
+
+			if err := k.SafeMint(ctx, packet.SourcePort, packet.SourceChannel, receiver, finalPriceDenom, packetAck.Gain); err != nil {
+				return err
+			}
+		}
 		return nil
 	default:
 		// The counter-party module doesn't implement the correct acknowledgment format
@@ -108,8 +172,14 @@ func (k Keeper) OnAcknowledgementSellOrderPacket(ctx sdk.Context, packet channel
 
 // OnTimeoutSellOrderPacket responds to the case where a packet has not been transmitted because of a timeout
 func (k Keeper) OnTimeoutSellOrderPacket(ctx sdk.Context, packet channeltypes.Packet, data types.SellOrderPacketData) error {
+	receiver, err := sdk.AccAddressFromBech32(data.Seller)
+	if err != nil {
+		return err
+	}
 
-	// TODO: packet timeout logic
+	if err := k.SafeMint(ctx, packet.SourcePort, packet.SourceChannel, receiver, data.AmountDenom, data.Amount); err != nil {
+		return err
+	}
 
 	return nil
 }
