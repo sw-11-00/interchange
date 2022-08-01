@@ -73,7 +73,6 @@ func (k Keeper) OnRecvSellOrderPacket(ctx sdk.Context, packet channeltypes.Packe
 		return packetAck, err
 	}
 
-	// TODO: packet reception logic
 	pairIndex := types.OrderBookIndex(packet.SourcePort, packet.SourceChannel, data.AmountDenom, data.PriceDenom)
 	book, found := k.GetBuyOrderBook(ctx, pairIndex)
 	if !found {
